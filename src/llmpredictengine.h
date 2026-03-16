@@ -32,6 +32,8 @@ public:
     ~LLMPredictEngine() override;
 
     // ── InputMethodEngine interface ──────────────────────────────────────
+    std::vector<fcitx::InputMethodEntry> listInputMethods() override;
+
     void keyEvent(const fcitx::InputMethodEntry &entry,
                   fcitx::KeyEvent &keyEvent) override;
 

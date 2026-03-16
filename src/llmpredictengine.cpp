@@ -8,12 +8,81 @@
 #include <fcitx/inputpanel.h>
 #include <fcitx/userinterfacemanager.h>
 
+#include <cctype>
+#include <cstdlib>
+#include <fstream>
 #include <string>
 
 FCITX_DEFINE_LOG_CATEGORY(llmPredict, "llm_predict")
 #define FCITX_LLM_DEBUG() FCITX_LOGC(llmPredict, Debug)
 #define FCITX_LLM_INFO()  FCITX_LOGC(llmPredict, Info)
 #define FCITX_LLM_WARN()  FCITX_LOGC(llmPredict, Warn)
+
+namespace {
+
+std::string trimAscii(std::string s) {
+    size_t begin = 0;
+    while (begin < s.size() && std::isspace(static_cast<unsigned char>(s[begin]))) {
+        ++begin;
+    }
+    size_t end = s.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(s[end - 1]))) {
+        --end;
+    }
+    return s.substr(begin, end - begin);
+}
+
+std::string readModelPathFromIni(const std::string &path) {
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        return {};
+    }
+
+    bool inSection = false;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::string s = trimAscii(line);
+        if (s.empty() || s[0] == '#' || s[0] == ';') {
+            continue;
+        }
+        if (s.front() == '[' && s.back() == ']') {
+            inSection = (s == "[LLMPredictConfig]");
+            continue;
+        }
+        if (!inSection) {
+            continue;
+        }
+
+        constexpr const char *kKey = "ModelPath";
+        if (s.rfind(kKey, 0) == 0) {
+            const size_t eq = s.find('=');
+            if (eq != std::string::npos) {
+                return trimAscii(s.substr(eq + 1));
+            }
+        }
+    }
+
+    return {};
+}
+
+std::string fallbackModelPathFromUserConfig() {
+    const char *home = std::getenv("HOME");
+    if (!home || !*home) {
+        return {};
+    }
+    const std::string homeDir(home);
+
+    std::string modelPath = readModelPathFromIni(
+        homeDir + "/.config/fcitx5/conf/fcitx5-llm-predict.conf");
+    if (!modelPath.empty()) {
+        return modelPath;
+    }
+
+    return readModelPathFromIni(
+        homeDir + "/.local/share/fcitx5/conf/fcitx5-llm-predict.conf");
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // CandidateWord: represents one LLM prediction in the candidate panel.
@@ -40,12 +109,26 @@ private:
 LLMPredictEngine::LLMPredictEngine(fcitx::Instance *instance)
     : instance_(instance)
 {
-    // Load configuration from
-    //   ~/.config/fcitx5/conf/fcitx5-llm-predict.conf  (user, PkgConfig)
-    // or the system-wide equivalent if the user file is absent.
+    // Prefer standard user config locations first.
+    // Some builds resolve Type::Config from ~/.config/fcitx5/, others from
+    // ~/.config/, so we try both relative path variants.
     fcitx::readAsIni(config_,
-                     fcitx::StandardPath::Type::PkgConfig,
+                     fcitx::StandardPath::Type::Config,
                      "conf/fcitx5-llm-predict.conf");
+
+    if (config_.modelPath->empty()) {
+        fcitx::readAsIni(config_,
+                         fcitx::StandardPath::Type::Config,
+                         "fcitx5/conf/fcitx5-llm-predict.conf");
+    }
+
+    // Backward-compatible fallback for older installs that placed the config
+    // under PkgConfig data paths.
+    if (config_.modelPath->empty()) {
+        fcitx::readAsIni(config_,
+                         fcitx::StandardPath::Type::PkgConfig,
+                         "conf/fcitx5-llm-predict.conf");
+    }
 
     reloadPredictor();
 }
@@ -54,8 +137,24 @@ LLMPredictEngine::~LLMPredictEngine() = default;
 
 // ---------------------------------------------------------------------------
 
+std::vector<fcitx::InputMethodEntry> LLMPredictEngine::listInputMethods() {
+    std::vector<fcitx::InputMethodEntry> entries;
+    entries.emplace_back("llm-predict", "LLM Predict", "en",
+                         "fcitx5-llm-predict");
+    entries.back().setNativeName("LLM Next-Word Predictor")
+        .setIcon("fcitx-keyboard")
+        .setLabel("AI")
+        .setConfigurable(true);
+    return entries;
+}
+
+// ---------------------------------------------------------------------------
+
 void LLMPredictEngine::reloadPredictor() {
-    const std::string &modelPath = *config_.modelPath;
+    std::string modelPath = *config_.modelPath;
+    if (modelPath.empty()) {
+        modelPath = fallbackModelPathFromUserConfig();
+    }
 
     if (modelPath.empty()) {
         FCITX_LLM_WARN() << "LLM model path is not configured. "

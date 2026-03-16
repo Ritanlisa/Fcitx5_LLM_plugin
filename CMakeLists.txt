@@ -8,6 +8,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ── Standard CMake modules ─────────────────────────────────────────────────────
 include(GNUInstallDirs)
 
+# Debian/Ubuntu Fcitx5 looks for addon libraries under the multiarch libdir.
+# For a local prefix like ~/.local, GNUInstallDirs defaults to plain "lib",
+# which makes the addon descriptor visible but leaves the shared library in a
+# directory that Fcitx5 does not scan.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux"
+   AND EXISTS "/etc/debian_version"
+   AND CMAKE_LIBRARY_ARCHITECTURE
+   AND CMAKE_INSTALL_LIBDIR STREQUAL "lib")
+    set(CMAKE_INSTALL_LIBDIR "lib/${CMAKE_LIBRARY_ARCHITECTURE}" CACHE PATH
+        "Object code libraries" FORCE)
+endif()
+
 # ── ECM (optional) ────────────────────────────────────────────────────────────
 # Extra CMake Modules provide convenience helpers (ECMSetupVersion,
 # ECMUninstallTarget, …).  They are not required for a successful build; the
@@ -66,6 +78,12 @@ add_library(fcitx5-llm-predict SHARED
     src/llmpredictengine.cpp
 )
 
+# Ensure runtime dependencies can be resolved when Fcitx5 is launched without
+# inheriting user shell environment variables.
+set_target_properties(fcitx5-llm-predict PROPERTIES
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+)
+
 # Keep the default "lib" prefix so the installed file is libfcitx5-llm-predict.so,
 # consistent with all other Fcitx5 addons shipped by the distro.
 
@@ -87,6 +105,27 @@ elseif(LLAMA_FOUND)
 else()
     target_include_directories(fcitx5-llm-predict PRIVATE ${LLAMA_INCLUDE_DIRS})
     target_link_libraries(fcitx5-llm-predict PRIVATE ${LLAMA_LIBRARY})
+endif()
+
+# When a custom llama runtime prefix is provided, embed its lib dirs into
+# RUNPATH so /usr/lib/.../fcitx5/libfcitx5-llm-predict.so can find libllama.so.
+if(LLAMA_CPP_DIR)
+    set(_llama_rpath_candidates
+        "${LLAMA_CPP_DIR}/lib"
+        "${LLAMA_CPP_DIR}/lib64"
+    )
+    set(_llama_runtime_rpaths "")
+    foreach(_dir IN LISTS _llama_rpath_candidates)
+        if(EXISTS "${_dir}")
+            list(APPEND _llama_runtime_rpaths "${_dir}")
+        endif()
+    endforeach()
+    if(_llama_runtime_rpaths)
+        set_target_properties(fcitx5-llm-predict PROPERTIES
+            BUILD_RPATH "${_llama_runtime_rpaths}"
+            INSTALL_RPATH "${_llama_runtime_rpaths}"
+        )
+    endif()
 endif()
 
 # ── Installation ───────────────────────────────────────────────────────────────

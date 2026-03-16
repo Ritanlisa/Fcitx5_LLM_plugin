@@ -71,7 +71,7 @@ cmake -B build \
       -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
       -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-sudo cmake --install build
+cmake --install build
 ```
 
 This installs headers and the shared library under `~/.local`.
@@ -88,11 +88,27 @@ cmake -B build \
       -DCMAKE_PREFIX_PATH="$HOME/.local" \
       -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-sudo cmake --install build
+cmake --install build
 ```
 
 > **Tip:** If llama.cpp was installed to a non-standard prefix you can also pass
 > `-DLLAMA_CPP_DIR=<prefix>` directly.
+
+If you install the plugin under `~/.local`, do not use `sudo cmake --install`.
+Using `sudo` there can leave root-owned files under `~/.local/share/fcitx5`, and
+subsequent user installs will fail with permission errors.
+
+On some Debian/Ubuntu setups, Fcitx5 will discover addon descriptors from
+`~/.local/share/fcitx5/addon` but still fail to locate the addon shared library
+from a user-local prefix. If that happens, either install the plugin into the
+system Fcitx5 directories instead, or expose your local library directories to
+the runtime linker before restarting Fcitx5.
+
+Example cleanup for a previous mistaken `sudo` install into `~/.local`:
+
+```bash
+sudo chown -R "$USER":"$USER" ~/.local/share/fcitx5 ~/.local/lib/fcitx5 ~/.local/lib/*/fcitx5
+```
 
 ---
 

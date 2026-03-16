@@ -22,18 +22,18 @@ struct LLMPredictor::Impl {
 
     ~Impl() {
         if (ctx)   { llama_free(ctx);         ctx   = nullptr; }
-        if (model) { llama_model_free(model);  model = nullptr; }
+        if (model) { llama_free_model(model);   model = nullptr; }
     }
 };
 
 namespace {
 
 llama_context *createContext(llama_model *model, llama_context_params params) {
-    return llama_init_from_model(model, params);
+    return llama_new_context_with_model(model, params);
 }
 
 void clearContextMemory(llama_context *ctx) {
-    llama_memory_clear(llama_get_memory(ctx), false);
+    llama_kv_cache_clear(ctx);
 }
 
 int tokenizeText(const llama_model *model,
@@ -43,13 +43,12 @@ int tokenizeText(const llama_model *model,
                  int32_t tokenCapacity,
                  bool addSpecial,
                  bool parseSpecial) {
-    const llama_vocab *vocab = llama_model_get_vocab(model);
-    return llama_tokenize(vocab, text, textLen, tokens, tokenCapacity,
+    return llama_tokenize(model, text, textLen, tokens, tokenCapacity,
                           addSpecial, parseSpecial);
 }
 
 int vocabSize(const llama_model *model) {
-    return llama_vocab_n_tokens(llama_model_get_vocab(model));
+    return llama_n_vocab(model);
 }
 
 int tokenToPiece(const llama_model *model,
@@ -58,7 +57,7 @@ int tokenToPiece(const llama_model *model,
                  int32_t length,
                  int32_t lstrip,
                  bool special) {
-    return llama_token_to_piece(llama_model_get_vocab(model), token,
+    return llama_token_to_piece(model, token,
                                 buf, length, lstrip, special);
 }
 
@@ -83,7 +82,7 @@ LLMPredictor::LLMPredictor(const Config &config)
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = config.nGpuLayers; // -1 = all layers on GPU
 
-    impl_->model = llama_model_load_from_file(config.modelPath.c_str(), mparams);
+    impl_->model = llama_load_model_from_file(config.modelPath.c_str(), mparams);
     if (!impl_->model) {
         return; // error already printed by llama.cpp
     }
@@ -99,7 +98,7 @@ LLMPredictor::LLMPredictor(const Config &config)
 
     impl_->ctx = createContext(impl_->model, cparams);
     if (!impl_->ctx) {
-        llama_model_free(impl_->model);
+        llama_free_model(impl_->model);
         impl_->model = nullptr;
         return;
     }
