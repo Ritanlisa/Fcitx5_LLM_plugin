@@ -26,9 +26,38 @@ digit key.
 | CMake | ≥ 3.19 |
 | GCC / Clang | C++17 support |
 | Extra CMake Modules (ECM) | ≥ 1.0 (optional) |
-| Fcitx5 development headers | `libfcitx5-dev` (Ubuntu) or equivalent |
+| Fcitx5 development headers | `fcitx5-dev` + `libfcitx5core-dev` + `libfcitx5config-dev` + `libfcitx5utils-dev` (Ubuntu) |
 | llama.cpp | Built **with CUDA support** – see below |
 | CUDA Toolkit | ≥ 11.7 (for `GGML_CUDA=ON`) |
+
+---
+
+## Install Build Dependencies
+
+Run the following once to install all required system packages before building:
+
+**Ubuntu / Debian**
+```bash
+sudo apt update
+sudo apt install -y \
+    cmake \
+    g++ \
+    fcitx5-dev \
+    libfcitx5core-dev \
+    libfcitx5config-dev \
+    libfcitx5utils-dev \
+    extra-cmake-modules   # optional but recommended
+```
+
+**Arch Linux**
+```bash
+sudo pacman -S --needed cmake gcc fcitx5 extra-cmake-modules
+```
+
+**Fedora / RHEL**
+```bash
+sudo dnf install -y cmake gcc-c++ fcitx5-devel extra-cmake-modules
+```
 
 ---
 
