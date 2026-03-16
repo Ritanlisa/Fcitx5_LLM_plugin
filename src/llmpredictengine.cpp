@@ -139,10 +139,10 @@ void LLMPredictEngine::keyEvent(const fcitx::InputMethodEntry &,
                 int idx = static_cast<int>(key.sym() - FcitxKey_1);
                 if (idx < clist->size()) {
                     clist->candidate(idx).select(ic);
-                    // Clear candidates after selection.
-                    ic->inputPanel().reset();
-                    ic->updateUserInterface(
-                        fcitx::UserInterfaceComponent::InputPanel);
+                    // Refresh the candidate panel so the user immediately
+                    // sees predictions for the token that follows the one
+                    // just committed.
+                    updateCandidates(ic);
                     keyEvent.filterAndAccept();
                     return;
                 }
