@@ -26,7 +26,7 @@ digit key.
 | CMake | ≥ 3.19 |
 | GCC / Clang | C++17 support |
 | Extra CMake Modules (ECM) | ≥ 1.0 (optional) |
-| Fcitx5 development headers | `fcitx5-dev` + `libfcitx5core-dev` + `libfcitx5config-dev` + `libfcitx5utils-dev` (Ubuntu) |
+| Fcitx5 development headers | `libfcitx5core-dev` + `libfcitx5config-dev` + `libfcitx5utils-dev` (Ubuntu) |
 | llama.cpp | Built **with CUDA support** – see below |
 | CUDA Toolkit | ≥ 11.7 (for `GGML_CUDA=ON`) |
 
@@ -42,7 +42,6 @@ sudo apt update
 sudo apt install -y \
     cmake \
     g++ \
-    fcitx5-dev \
     libfcitx5core-dev \
     libfcitx5config-dev \
     libfcitx5utils-dev \
