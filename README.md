@@ -25,7 +25,7 @@ digit key.
 | Ubuntu | 22.04 or later |
 | CMake | ≥ 3.19 |
 | GCC / Clang | C++17 support |
-| Extra CMake Modules (ECM) | ≥ 1.0 |
+| Extra CMake Modules (ECM) | ≥ 1.0 (optional) |
 | Fcitx5 development headers | `libfcitx5-dev` (Ubuntu) or equivalent |
 | llama.cpp | Built **with CUDA support** – see below |
 | CUDA Toolkit | ≥ 11.7 (for `GGML_CUDA=ON`) |
