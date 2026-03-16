@@ -71,7 +71,7 @@ cmake -B build \
       -DCMAKE_INSTALL_PREFIX="$HOME/.local" \
       -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-cmake --install build
+sudo cmake --install build
 ```
 
 This installs headers and the shared library under `~/.local`.

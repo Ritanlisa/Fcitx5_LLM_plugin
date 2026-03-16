@@ -12,74 +12,6 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
-// API compatibility shims for llama.cpp.
-//
-// llama.cpp renamed several functions around build b3500:
-//   llama_load_model_from_file  →  llama_model_load_from_file
-//   llama_free_model            →  llama_model_free
-//
-// Around build b4400 the context / KV-cache / vocab APIs were refactored:
-//   llama_new_context_with_params(model, params) → llama_new_context_with_model
-//   llama_kv_cache_clear(ctx)                    → llama_kv_self_clear(ctx)
-//   llama_tokenize / llama_token_to_piece / llama_n_vocab now take
-//     `const llama_vocab *` (obtained via llama_model_get_vocab) instead of
-//     `const llama_model *`.
-//   llama_n_vocab(vocab) is deprecated in favour of llama_vocab_n_tokens(vocab).
-//
-// We always call the new names.  For older builds (LLAMA_BUILD_NUMBER absent
-// or below the respective threshold) we define shims so the rest of the code
-// compiles unchanged.
-//
-// Additionally, llama_context_params::seed was removed around build b3948.
-// We no longer set it; see the comment in the constructor below.
-// ---------------------------------------------------------------------------
-#if !defined(LLAMA_BUILD_NUMBER) || LLAMA_BUILD_NUMBER < 3500
-#  define llama_model_load_from_file  llama_load_model_from_file
-#  define llama_model_free            llama_free_model
-#endif
-
-#if !defined(LLAMA_BUILD_NUMBER) || LLAMA_BUILD_NUMBER < 4400
-// Context creation was renamed.
-#  define llama_new_context_with_model  llama_new_context_with_params
-// KV-cache clear was renamed.
-#  define llama_kv_self_clear  llama_kv_cache_clear
-// On old builds there was no separate llama_vocab type; the tokenize /
-// token_to_piece / n_vocab functions took llama_model* directly.
-// Provide thin wrappers that accept the new llama_vocab* signature and
-// cast back to llama_model* when calling the old functions.
-//
-// The reinterpret_casts below are safe under the old API: llama_model_get_vocab
-// (defined here) simply returns the model pointer itself, so what we cast back
-// is always the original llama_model* value.  This is an opaque-pointer trick
-// that is valid on all common ABI implementations.
-static inline const llama_vocab *llama_model_get_vocab(const llama_model *m) {
-    return reinterpret_cast<const llama_vocab *>(m);
-}
-static inline int32_t llama_vocab_n_tokens(const llama_vocab *v) {
-    return llama_n_vocab(reinterpret_cast<const llama_model *>(v));
-}
-// These wrappers intentionally share the names of the new API functions so that
-// the calling code below compiles unchanged on both old and new builds.
-// C++ overload resolution picks these (vocab* first arg) over the old
-// extern "C" declarations (model* first arg) without ambiguity.
-static inline int32_t llama_tokenize(const llama_vocab *vocab,
-                                     const char *text, int32_t text_len,
-                                     llama_token *tokens, int32_t n_tokens_max,
-                                     bool add_special, bool parse_special) {
-    return llama_tokenize(reinterpret_cast<const llama_model *>(vocab),
-                          text, text_len, tokens, n_tokens_max,
-                          add_special, parse_special);
-}
-static inline int32_t llama_token_to_piece(const llama_vocab *vocab,
-                                           llama_token token,
-                                           char *buf, int32_t length,
-                                           int32_t lstrip, bool special) {
-    return llama_token_to_piece(reinterpret_cast<const llama_model *>(vocab),
-                                token, buf, length, lstrip, special);
-}
-#endif
-
-// ---------------------------------------------------------------------------
 // Internal implementation details – hidden from the header.
 // ---------------------------------------------------------------------------
 struct LLMPredictor::Impl {
@@ -93,6 +25,44 @@ struct LLMPredictor::Impl {
         if (model) { llama_model_free(model);  model = nullptr; }
     }
 };
+
+namespace {
+
+llama_context *createContext(llama_model *model, llama_context_params params) {
+    return llama_init_from_model(model, params);
+}
+
+void clearContextMemory(llama_context *ctx) {
+    llama_memory_clear(llama_get_memory(ctx), false);
+}
+
+int tokenizeText(const llama_model *model,
+                 const char *text,
+                 int32_t textLen,
+                 llama_token *tokens,
+                 int32_t tokenCapacity,
+                 bool addSpecial,
+                 bool parseSpecial) {
+    const llama_vocab *vocab = llama_model_get_vocab(model);
+    return llama_tokenize(vocab, text, textLen, tokens, tokenCapacity,
+                          addSpecial, parseSpecial);
+}
+
+int vocabSize(const llama_model *model) {
+    return llama_vocab_n_tokens(llama_model_get_vocab(model));
+}
+
+int tokenToPiece(const llama_model *model,
+                 llama_token token,
+                 char *buf,
+                 int32_t length,
+                 int32_t lstrip,
+                 bool special) {
+    return llama_token_to_piece(llama_model_get_vocab(model), token,
+                                buf, length, lstrip, special);
+}
+
+} // namespace
 
 // ---------------------------------------------------------------------------
 // Constructor – loads the GGUF model and creates an inference context.
@@ -127,7 +97,7 @@ LLMPredictor::LLMPredictor(const Config &config)
     // Seeding is irrelevant here because we read raw logits directly without
     // using a sampler, so inference is fully deterministic.
 
-    impl_->ctx = llama_new_context_with_model(impl_->model, cparams);
+    impl_->ctx = createContext(impl_->model, cparams);
     if (!impl_->ctx) {
         llama_model_free(impl_->model);
         impl_->model = nullptr;
@@ -156,29 +126,27 @@ std::vector<TokenCandidate> LLMPredictor::predict(const std::string &context,
 
     auto *model = impl_->model;
     auto *ctx   = impl_->ctx;
-    const llama_vocab *vocab = llama_model_get_vocab(model);
-
     // ── Tokenise the context string ───────────────────────────────────────
     // First call with a null buffer: llama_tokenize returns the negative of the
     // number of tokens needed, so we negate it to get the required count.
-    int tokenCountNeeded = -llama_tokenize(vocab,
-                                    context.c_str(),
-                                    static_cast<int>(context.size()),
-                                    nullptr, 0,
-                                    /*add_special=*/true,
-                                    /*parse_special=*/false);
+    int tokenCountNeeded = -tokenizeText(model,
+                                         context.c_str(),
+                                         static_cast<int>(context.size()),
+                                         nullptr, 0,
+                                         /*add_special=*/true,
+                                         /*parse_special=*/false);
     if (tokenCountNeeded <= 0) {
         return {};
     }
 
     std::vector<llama_token> tokens(static_cast<size_t>(tokenCountNeeded));
-    int nTokens = llama_tokenize(vocab,
-                                 context.c_str(),
-                                 static_cast<int>(context.size()),
-                                 tokens.data(),
-                                 static_cast<int>(tokens.size()),
-                                 /*add_special=*/true,
-                                 /*parse_special=*/false);
+    int nTokens = tokenizeText(model,
+                               context.c_str(),
+                               static_cast<int>(context.size()),
+                               tokens.data(),
+                               static_cast<int>(tokens.size()),
+                               /*add_special=*/true,
+                               /*parse_special=*/false);
     if (nTokens < 0) {
         return {};
     }
@@ -194,7 +162,7 @@ std::vector<TokenCandidate> LLMPredictor::predict(const std::string &context,
     }
 
     // ── Clear KV-cache and run a fresh decode ─────────────────────────────
-    llama_kv_self_clear(ctx);
+    clearContextMemory(ctx);
 
     llama_batch batch = llama_batch_init(nTokens, /*embd=*/0, /*n_seq_max=*/1);
 
@@ -219,7 +187,7 @@ std::vector<TokenCandidate> LLMPredictor::predict(const std::string &context,
     // Since we set logits=1 only for the last token, n_outputs==1 and
     // llama_get_logits points directly to that token's logits.
     float *logits = llama_get_logits(ctx);
-    const int nVocab = llama_vocab_n_tokens(vocab);
+    const int nVocab = vocabSize(model);
 
     // ── Softmax ───────────────────────────────────────────────────────────
     std::vector<float> probs(static_cast<size_t>(nVocab));
@@ -255,10 +223,10 @@ std::vector<TokenCandidate> LLMPredictor::predict(const std::string &context,
 
         // llama_token_to_piece: negative return means buffer too small.
         char buf[256] = {};
-        int  len = llama_token_to_piece(vocab, tokenId,
-                                        buf, static_cast<int>(sizeof(buf) - 1),
-                                        /*lstrip=*/0,
-                                        /*special=*/false);
+        int len = tokenToPiece(model, tokenId,
+                       buf, static_cast<int>(sizeof(buf) - 1),
+                       /*lstrip=*/0,
+                       /*special=*/false);
         if (len <= 0) {
             continue;
         }
