@@ -5,13 +5,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# ── ECM ────────────────────────────────────────────────────────────────────────
-find_package(ECM 1.0.0 REQUIRED NO_MODULE)
-list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
-
+# ── Standard CMake modules ─────────────────────────────────────────────────────
 include(GNUInstallDirs)
-include(ECMSetupVersion)
-include(ECMUninstallTarget)
+
+# ── ECM (optional) ────────────────────────────────────────────────────────────
+# Extra CMake Modules provide convenience helpers (ECMSetupVersion,
+# ECMUninstallTarget, …).  They are not required for a successful build; the
+# plugin compiles and installs correctly without them.
+find_package(ECM 1.0.0 QUIET NO_MODULE)
+if(ECM_FOUND)
+    list(APPEND CMAKE_MODULE_PATH ${ECM_MODULE_PATH})
+    include(ECMSetupVersion)
+    include(ECMUninstallTarget)
+endif()
 
 # ── Fcitx5 ─────────────────────────────────────────────────────────────────────
 # Fcitx5Utils provides install-dir variables (FCITX_INSTALL_ADDONDIR, etc.)
