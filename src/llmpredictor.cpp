@@ -26,19 +26,21 @@
 //     `const llama_model *`.
 //   llama_n_vocab(vocab) is deprecated in favour of llama_vocab_n_tokens(vocab).
 //
-// We always call the new names.  For older builds (LLAMA_BUILD_NUMBER absent
-// or below the respective threshold) we define shims so the rest of the code
-// compiles unchanged.
+// We always call the new names.  For older builds where LLAMA_BUILD_NUMBER is
+// defined and below the respective threshold we define shims so the rest of
+// the code compiles unchanged.  When LLAMA_BUILD_NUMBER is absent we assume
+// the new API is present (typical for builds from source without an explicit
+// build number).
 //
 // Additionally, llama_context_params::seed was removed around build b3948.
 // We no longer set it; see the comment in the constructor below.
 // ---------------------------------------------------------------------------
-#if !defined(LLAMA_BUILD_NUMBER) || LLAMA_BUILD_NUMBER < 3500
+#if defined(LLAMA_BUILD_NUMBER) && LLAMA_BUILD_NUMBER < 3500
 #  define llama_model_load_from_file  llama_load_model_from_file
 #  define llama_model_free            llama_free_model
 #endif
 
-#if !defined(LLAMA_BUILD_NUMBER) || LLAMA_BUILD_NUMBER < 4400
+#if defined(LLAMA_BUILD_NUMBER) && LLAMA_BUILD_NUMBER < 4400
 // Context creation was renamed.
 #  define llama_new_context_with_model  llama_new_context_with_params
 // KV-cache clear was renamed.
