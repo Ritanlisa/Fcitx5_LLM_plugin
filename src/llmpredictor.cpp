@@ -12,6 +12,25 @@
 #include <vector>
 
 // ---------------------------------------------------------------------------
+// API compatibility shims for llama.cpp.
+//
+// llama.cpp renamed several functions around build b3500:
+//   llama_load_model_from_file  →  llama_model_load_from_file
+//   llama_free_model            →  llama_model_free
+//
+// We always call the new names.  For older builds (LLAMA_BUILD_NUMBER < 3500,
+// or where the macro is absent), we define the new names as macros that
+// forward to the old functions so the rest of the code stays uniform.
+//
+// Additionally, llama_context_params::seed was removed around build b3948.
+// We no longer set it; see the comment in the constructor below.
+// ---------------------------------------------------------------------------
+#if !defined(LLAMA_BUILD_NUMBER) || LLAMA_BUILD_NUMBER < 3500
+#  define llama_model_load_from_file  llama_load_model_from_file
+#  define llama_model_free            llama_free_model
+#endif
+
+// ---------------------------------------------------------------------------
 // Internal implementation details – hidden from the header.
 // ---------------------------------------------------------------------------
 struct LLMPredictor::Impl {
@@ -21,8 +40,8 @@ struct LLMPredictor::Impl {
     bool           loaded = false;
 
     ~Impl() {
-        if (ctx)   { llama_free(ctx);        ctx   = nullptr; }
-        if (model) { llama_free_model(model); model = nullptr; }
+        if (ctx)   { llama_free(ctx);         ctx   = nullptr; }
+        if (model) { llama_model_free(model);  model = nullptr; }
     }
 };
 
@@ -45,7 +64,7 @@ LLMPredictor::LLMPredictor(const Config &config)
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = config.nGpuLayers; // -1 = all layers on GPU
 
-    impl_->model = llama_load_model_from_file(config.modelPath.c_str(), mparams);
+    impl_->model = llama_model_load_from_file(config.modelPath.c_str(), mparams);
     if (!impl_->model) {
         return; // error already printed by llama.cpp
     }
@@ -55,12 +74,13 @@ LLMPredictor::LLMPredictor(const Config &config)
     cparams.n_ctx      = static_cast<uint32_t>(config.nCtx);
     cparams.n_batch    = static_cast<uint32_t>(config.nCtx);
     cparams.n_threads  = static_cast<uint32_t>(config.nThreads);
-    cparams.seed       = static_cast<uint32_t>(
-                             config.seed >= 0 ? config.seed : LLAMA_DEFAULT_SEED);
+    // Note: llama_context_params::seed was removed in llama.cpp ≥ b3948.
+    // Seeding is irrelevant here because we read raw logits directly without
+    // using a sampler, so inference is fully deterministic.
 
     impl_->ctx = llama_new_context_with_params(impl_->model, cparams);
     if (!impl_->ctx) {
-        llama_free_model(impl_->model);
+        llama_model_free(impl_->model);
         impl_->model = nullptr;
         return;
     }

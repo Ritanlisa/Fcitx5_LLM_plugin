@@ -32,7 +32,6 @@ public:
         int nGpuLayers = -1; ///< -1 = offload all layers to GPU
         int nCtx       = 2048;
         int nThreads   = 4;
-        int seed       = -1; ///< -1 = random seed
     };
 
     explicit LLMPredictor(const Config &config);
